@@ -4,7 +4,6 @@ import {
   type ClientMessage,
   type NightActions,
   type NightReport,
-  type NightStep,
   type Phase,
   type Player,
   type RoleId,
@@ -17,11 +16,12 @@ import {
 import { MAX_PLAYERS, buildDeck, deckFor, shuffle, validateCount } from '../shared/roles';
 import { checkWinner, publicNightAnnouncement, resolveNight, tallyVotes } from '../shared/engine';
 
-const NIGHT_ORDER: NightStep[] = ['KILLER', 'POLICE', 'NUN', 'THIEF', 'RESOLVE'];
 const CHAT_LIMIT = 200;
-/** โหมด AUTO: กลางคืนต้องเดินครบเวลาทุกขั้น ไม่ตัดจบเร็วแม้ทุกคนกดแล้ว
- *  มิฉะนั้นความเร็วในการจบขั้นจะกลายเป็นเบาะแสว่าบทบาทนั้นตายไปแล้ว */
-const AUTO_NIGHT_STEP_FALLBACK = 20;
+/** บทบาทที่มี action ตอนกลางคืน — ทุกบทบาทนี้ลืมตาพร้อมกัน ไม่ได้เรียกทีละคน */
+const NIGHT_ROLES: RoleId[] = ['KILLER', 'POLICE', 'NUN', 'THIEF'];
+/** โหมด AUTO: กลางคืนต้องเดินครบเวลาเสมอ ไม่ตัดจบเร็วแม้ทุกคนกดครบแล้ว
+ *  มิฉะนั้นความเร็วในการจบคืนจะกลายเป็นเบาะแสว่ามีบทบาทไหนตายไปบ้าง */
+const AUTO_NIGHT_FALLBACK = 45;
 /** โหมด AUTO: เวลาให้อ่านผลประกาศก่อนเปิดอภิปราย และเวลาให้อ่านผลโหวตก่อนขึ้นคืนใหม่ (วินาที) */
 const AUTO_READ_REPORT = 12;
 const AUTO_READ_VOTE = 15;
@@ -31,7 +31,6 @@ interface RoomState {
   settings: RoomSettings;
   phase: Phase;
   round: number;
-  nightStep: NightStep | null;
   players: Player[];
   actions: NightActions;
   nightReports: NightReport[];
@@ -77,7 +76,6 @@ export class RoomDurableObject implements DurableObject {
         settings: { ...DEFAULT_SETTINGS },
         phase: 'LOBBY',
         round: 0,
-        nightStep: null,
         players: [],
         actions: emptyActions(),
         nightReports: [],
@@ -259,10 +257,10 @@ export class RoomDurableObject implements DurableObject {
         if (err) return this.error(ws, err);
         break;
       }
-      case 'NEXT_STEP': {
+      case 'END_NIGHT': {
         if (!modOnly()) return;
         if (room.phase !== 'NIGHT') return this.error(ws, 'ตอนนี้ไม่ใช่ช่วงกลางคืน');
-        this.advanceNight(room);
+        this.resolveNightPhase(room);
         break;
       }
       case 'OPEN_DISCUSSION': {
@@ -393,7 +391,6 @@ export class RoomDurableObject implements DurableObject {
     room.deck = shuffle(buildDeck(comp));
     room.phase = 'DEALING';
     room.round = 0;
-    room.nightStep = null;
     room.winner = null;
     room.nightReports = [];
     room.voteReports = [];
@@ -418,26 +415,27 @@ export class RoomDurableObject implements DurableObject {
   private beginNight(room: RoomState) {
     room.round += 1;
     room.phase = 'NIGHT';
-    room.nightStep = 'KILLER';
     room.actions = emptyActions();
     room.votes = {};
     room.isRevote = false;
     room.publicLog.push(`🌙 คืนที่ ${room.round} — ทุกคนหลับตา`);
-    this.setNightDeadline(room);
+
+    // กลางคืนเป็นช่วงเดียว ทุกบทบาทกดพร้อมกันได้เลย ไม่ต้องรอเรียกทีละคน
+    const auto = room.settings.moderatorMode === 'AUTO';
+    const secs = auto ? room.settings.nightSeconds || AUTO_NIGHT_FALLBACK : room.settings.nightSeconds;
+    room.deadline = secs ? Date.now() + secs * 1000 : null;
   }
 
-  private setNightDeadline(room: RoomState) {
-    const auto = room.settings.moderatorMode === 'AUTO';
-    const secs = auto
-      ? room.settings.nightStepSeconds || AUTO_NIGHT_STEP_FALLBACK
-      : room.settings.nightStepSeconds;
-    room.deadline = secs ? Date.now() + secs * 1000 : null;
+  /** ตำรวจสืบได้รอบละ 1 ครั้ง กดแล้วเปลี่ยนใจไม่ได้ บทบาทอื่นแก้ตัวเลือกได้จนหมดเวลา */
+  private isLocked(room: RoomState, me: Player) {
+    return me.role === 'POLICE' && !!room.policeResults[room.round];
   }
 
   private submitNightAction(room: RoomState, me: Player, targetId: string | null): string | null {
     if (room.phase !== 'NIGHT') return 'ตอนนี้ไม่ใช่ช่วงกลางคืน';
     if (!me.alive || !me.role) return 'คุณทำ action ไม่ได้';
-    if (room.nightStep !== me.role) return 'ยังไม่ถึงตาของบทบาทคุณ';
+    if (!NIGHT_ROLES.includes(me.role)) return 'บทบาทของคุณไม่มี action ตอนกลางคืน';
+    if (this.isLocked(room, me)) return 'ตำรวจสืบได้รอบละ 1 ครั้งเท่านั้น รอคืนถัดไป';
 
     const target = targetId ? room.players.find((p) => p.id === targetId) : null;
     if (targetId && (!target || !target.alive || target.isModerator)) return 'เลือกคนนี้ไม่ได้';
@@ -450,12 +448,9 @@ export class RoomDurableObject implements DurableObject {
         break;
       case 'POLICE':
         if (targetId === me.id) return 'ตำรวจสืบตัวเองไม่ได้';
+        if (!target) return 'ต้องเลือกคนที่จะสืบ';
         room.actions.policeTarget = targetId;
-        if (target) {
-          room.policeResults[room.round] = { targetName: target.name, isKiller: target.role === 'KILLER' };
-        } else {
-          delete room.policeResults[room.round];
-        }
+        room.policeResults[room.round] = { targetName: target.name, isKiller: target.role === 'KILLER' };
         break;
       case 'NUN': {
         const limit = room.settings.nunSelfHealLimit;
@@ -468,18 +463,26 @@ export class RoomDurableObject implements DurableObject {
       case 'THIEF':
         room.actions.thiefTarget = targetId;
         break;
-      default:
-        return 'บทบาทของคุณไม่มี action ตอนกลางคืน';
     }
     return null;
   }
 
-  private advanceNight(room: RoomState) {
-    const idx = NIGHT_ORDER.indexOf(room.nightStep ?? 'KILLER');
-    const next = NIGHT_ORDER[idx + 1] ?? 'RESOLVE';
-    if (next === 'RESOLVE') return this.resolveNightPhase(room);
-    room.nightStep = next;
-    this.setNightDeadline(room);
+  /** ผู้เล่นที่ยังมีชีวิตและมี action ตอนกลางคืน (ใช้ทำแผงสถานะของพิธีกร) */
+  private nightActors(room: RoomState) {
+    return room.players.filter((p) => p.alive && p.role && NIGHT_ROLES.includes(p.role));
+  }
+
+  /** id ของคนที่ส่ง action ของคืนนี้แล้ว */
+  private nightSubmitted(room: RoomState) {
+    const ids = Object.keys(room.actions.killVotes);
+    for (const p of this.nightActors(room)) {
+      const done =
+        (p.role === 'POLICE' && room.actions.policeTarget) ||
+        (p.role === 'NUN' && room.actions.nunTarget) ||
+        (p.role === 'THIEF' && room.actions.thiefTarget);
+      if (done) ids.push(p.id);
+    }
+    return ids;
   }
 
   private resolveNightPhase(room: RoomState) {
@@ -496,7 +499,6 @@ export class RoomDurableObject implements DurableObject {
     }
 
     room.nightReports.push(report);
-    room.nightStep = null;
     room.phase = 'DAY_REPORT';
     room.deadline =
       room.settings.moderatorMode === 'AUTO' ? Date.now() + AUTO_READ_REPORT * 1000 : null;
@@ -548,7 +550,6 @@ export class RoomDurableObject implements DurableObject {
     if (!winner) return;
     room.winner = winner;
     room.phase = 'ENDED';
-    room.nightStep = null;
     room.deadline = null;
     room.publicLog.push(`🏁 ${winner.reason}`);
   }
@@ -556,7 +557,6 @@ export class RoomDurableObject implements DurableObject {
   private resetToLobby(room: RoomState) {
     room.phase = 'LOBBY';
     room.round = 0;
-    room.nightStep = null;
     room.winner = null;
     room.deck = [];
     room.actions = emptyActions();
@@ -626,8 +626,8 @@ export class RoomDurableObject implements DurableObject {
     }
 
     if (room.phase === 'NIGHT') {
-      // หมดเวลาของขั้นนี้ → ไปขั้นถัดไปเสมอ ไม่ว่าจะมีคนกดหรือไม่
-      this.advanceNight(room);
+      // หมดเวลากลางคืน → สรุปผลเสมอ ไม่ว่าจะมีใครยังไม่กดหรือไม่
+      this.resolveNightPhase(room);
     } else if (room.phase === 'DISCUSSION') {
       room.deadline = null;
       room.publicLog.push('⏰ หมดเวลาอภิปราย');
@@ -679,27 +679,19 @@ export class RoomDurableObject implements DurableObject {
       };
     });
 
-    const actorsFor = (step: NightStep | null) =>
-      step && step !== 'RESOLVE'
-        ? room.players.filter((p) => p.alive && p.role === (step as RoleId)).map((p) => p.id)
-        : [];
-    const actors = actorsFor(room.nightStep);
+    const inNight = room.phase === 'NIGHT';
+    const youHaveNightAction =
+      inNight && !!viewer?.alive && !!viewer.role && NIGHT_ROLES.includes(viewer.role);
 
-    const submitted = (() => {
-      if (!isMod || room.phase !== 'NIGHT') return [];
-      switch (room.nightStep) {
-        case 'KILLER':
-          return Object.keys(room.actions.killVotes);
-        case 'POLICE':
-          return room.actions.policeTarget ? actors : [];
-        case 'NUN':
-          return room.actions.nunTarget ? actors : [];
-        case 'THIEF':
-          return room.actions.thiefTarget ? actors : [];
-        default:
-          return [];
-      }
-    })();
+    const yourNightTarget = !youHaveNightAction
+      ? null
+      : viewer!.role === 'KILLER'
+        ? room.actions.killVotes[viewerId] ?? null
+        : viewer!.role === 'POLICE'
+          ? room.actions.policeTarget
+          : viewer!.role === 'NUN'
+            ? room.actions.nunTarget
+            : room.actions.thiefTarget;
 
     const isKiller = viewer?.role === 'KILLER';
     const chat = room.chat.filter((m) => {
@@ -714,15 +706,16 @@ export class RoomDurableObject implements DurableObject {
       settings: room.settings,
       phase: room.phase,
       round: room.round,
-      nightStep: room.nightStep,
       players,
       youId: viewerId,
       yourRole: viewer?.role ?? null,
       yourCard: viewer?.card ?? null,
       isModerator: isMod,
       privacyLock,
-      actingPlayerIds: isMod || actors.includes(viewerId) ? actors : [],
-      submittedPlayerIds: submitted,
+      youHaveNightAction,
+      yourNightTarget,
+      yourActionLocked: youHaveNightAction && this.isLocked(room, viewer!),
+      submittedPlayerIds: isMod && inNight ? this.nightSubmitted(room) : [],
       policeResult: viewer?.role === 'POLICE' ? room.policeResults[room.round] ?? null : null,
       fellowKillerIds: isKiller
         ? room.players.filter((p) => p.role === 'KILLER' && p.id !== viewerId).map((p) => p.id)

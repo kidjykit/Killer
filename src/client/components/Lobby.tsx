@@ -127,25 +127,25 @@ export function Lobby({ view, send }: { view: RoomView; send: (m: ClientMessage)
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label htmlFor="night-sec">เวลาต่อบทบาทตอนกลางคืน (วินาที)</label>
+            <label htmlFor="night-sec">เวลาช่วงกลางคืน (วินาที, 0 = ไม่จับเวลา)</label>
             <input
               id="night-sec"
               type="number"
               min={0}
-              max={120}
+              max={180}
               step={5}
-              value={s.nightStepSeconds}
+              value={s.nightSeconds}
               disabled={!isHost}
-              onChange={(e) => patch({ nightStepSeconds: Number(e.target.value) })}
+              onChange={(e) => patch({ nightSeconds: Number(e.target.value) })}
             />
           </div>
         </div>
-        {s.moderatorMode === 'AUTO' && (
-          <p className="muted small" style={{ margin: 0 }}>
-            โหมดอัตโนมัติจะเดินครบเวลาทุกขั้นเสมอ ไม่ตัดจบเร็วแม้ทุกคนกดแล้ว — เพราะความเร็วในการจบขั้น
-            จะกลายเป็นเบาะแสว่าบทบาทนั้นตายไปแล้ว
-          </p>
-        )}
+        <p className="muted small" style={{ margin: 0 }}>
+          กลางคืนทุกบทบาทลืมตาพร้อมกันและใช้เวลาชุดนี้ร่วมกัน ไม่ต้องรอเรียกทีละคน
+          {s.moderatorMode === 'AUTO'
+            ? ' โหมดอัตโนมัติจะเดินครบเวลาเสมอ ไม่ตัดจบเร็วแม้ทุกคนกดครบแล้ว เพราะความเร็วในการจบคืนจะกลายเป็นเบาะแสว่ามีบทบาทไหนตายไปบ้าง'
+            : ''}
+        </p>
       </div>
 
       <div className="card-panel stack">

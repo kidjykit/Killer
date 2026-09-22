@@ -22,9 +22,6 @@ export type Phase =
   | 'VOTE_RESULT'
   | 'ENDED';
 
-/** ลำดับการเรียกบทบาทในช่วงกลางคืน ตาม rule.md */
-export type NightStep = 'KILLER' | 'POLICE' | 'NUN' | 'THIEF' | 'RESOLVE';
-
 export type DeathCause = 'KILLED' | 'VOTED';
 
 export interface RoomSettings {
@@ -35,8 +32,11 @@ export interface RoomSettings {
   revealRoleOnDeath: boolean;
   /** วินาทีของช่วงอภิปราย (0 = ไม่จับเวลา) */
   discussionSeconds: number;
-  /** วินาทีต่อ 1 บทบาทในช่วงกลางคืน (0 = ไม่จับเวลา) */
-  nightStepSeconds: number;
+  /**
+   * วินาทีของช่วงกลางคืนทั้งช่วง (0 = ไม่จับเวลา)
+   * ทุกบทบาทลืมตาพร้อมกันและใช้เวลาชุดนี้ร่วมกัน ไม่ได้เรียกทีละบทบาท
+   */
+  nightSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: RoomSettings = {
@@ -44,7 +44,7 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   nunSelfHealLimit: 1,
   revealRoleOnDeath: false,
   discussionSeconds: 180,
-  nightStepSeconds: 30,
+  nightSeconds: 45,
 };
 
 export interface Player {
@@ -138,7 +138,6 @@ export interface RoomView {
   settings: RoomSettings;
   phase: Phase;
   round: number;
-  nightStep: NightStep | null;
   players: Player[];
   /** id ของผู้รับ view นี้ */
   youId: string;
@@ -152,8 +151,12 @@ export interface RoomView {
    * เพื่อไม่ให้ระบุตัวตนได้ พิธีกรเท่านั้นที่เห็น
    */
   privacyLock: boolean;
-  /** ผู้เล่นที่ถึงคิวทำ action ตอนนี้ (เห็นเฉพาะพิธีกรและเจ้าตัว) */
-  actingPlayerIds: string[];
+  /** ผู้รับ view นี้มีบทบาทที่ต้องทำ action ตอนกลางคืนหรือไม่ */
+  youHaveNightAction: boolean;
+  /** เป้าหมายที่ผู้รับเลือกไว้ในคืนนี้ (null = ยังไม่เลือก) */
+  yourNightTarget: string | null;
+  /** ผู้รับเลือกไปแล้วและแก้ไม่ได้อีกในรอบนี้ (ตำรวจสืบได้รอบละ 1 ครั้ง) */
+  yourActionLocked: boolean;
   /** ผู้เล่นที่ส่ง action ของคืนนี้แล้ว (เห็นเฉพาะพิธีกร) */
   submittedPlayerIds: string[];
   /** ผลตรวจของตำรวจในคืนนี้ ส่งให้เฉพาะตำรวจ */
@@ -186,7 +189,7 @@ export type ClientMessage =
   | { t: 'DRAW_CARD' }
   | { t: 'BEGIN_NIGHT' }
   | { t: 'NIGHT_ACTION'; targetId: string | null }
-  | { t: 'NEXT_STEP' }
+  | { t: 'END_NIGHT' }
   | { t: 'OPEN_DISCUSSION' }
   | { t: 'OPEN_VOTE' }
   | { t: 'CAST_VOTE'; targetId: string }

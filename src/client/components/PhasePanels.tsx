@@ -1,33 +1,16 @@
 import { ROLES } from '../../shared/roles';
-import type { ClientMessage, NightStep, RoomView } from '../../shared/types';
+import type { ClientMessage, RoleId, RoomView } from '../../shared/types';
 import { RoleCard } from './PlayingCard';
 
-/** บทพูดของพิธีกรในแต่ละขั้นของกลางคืน ตาม rule.md §3 */
-export const NIGHT_SCRIPT: Record<Exclude<NightStep, 'RESOLVE'>, { call: string; hint: string }> = {
-  KILLER: {
-    call: '“Killer ลืมตา… เลือกเหยื่อของคุณ”',
-    hint: 'ถ้ามี Killer 2 คน ต้องเลือกตรงกัน ไม่งั้นคืนนี้ไม่มีใครตาย',
-  },
-  POLICE: {
-    call: '“Killer หลับตา… ตำรวจลืมตา ชี้คนที่สงสัย”',
-    hint: 'ระบบจะตอบตำรวจเองว่า “ใช่ / ไม่ใช่” — พิธีกรไม่ต้องพยักหน้า',
-  },
-  NUN: {
-    call: '“ตำรวจหลับตา… แม่ชีลืมตา เลือกคนที่จะรักษา”',
-    hint: 'แม่ชีเลือกตัวเองได้ตามกติกาที่ตั้งไว้ในห้อง',
-  },
-  THIEF: {
-    call: '“แม่ชีหลับตา… โจรลืมตา เลือกคนที่จะปี้”',
-    hint: 'ถ้าโดนตัวแม่ชี แม่ชีจะศีลขาด รักษาไม่ขึ้นทั้งคืน',
-  },
-};
+/** บทพูดของพิธีกรตอนเปิดกลางคืน — ทุกบทบาทลืมตาพร้อมกัน ไม่ได้เรียกทีละคน */
+export const NIGHT_CALL = '“ทุกคนหลับตา… Killer ตำรวจ แม่ชี และโจร ลืมตาพร้อมกัน แล้วเลือกเป้าหมายของตัวเองได้เลย”';
 
-const STEP_LABEL: Record<NightStep, string> = {
-  KILLER: 'ตาของ Killer',
-  POLICE: 'ตาของตำรวจ',
-  NUN: 'ตาของแม่ชี',
-  THIEF: 'ตาของโจร',
-  RESOLVE: 'สรุปผล',
+/** คำสั่งที่ผู้เล่นแต่ละบทบาทเห็นตอนกลางคืน */
+const ROLE_CALL: Partial<Record<RoleId, string>> = {
+  KILLER: 'เลือกเหยื่อที่ต้องการฆ่า',
+  POLICE: 'เลือกคนที่สงสัย — สืบได้รอบละ 1 ครั้งเท่านั้น',
+  NUN: 'เลือกคนที่ต้องการรักษา',
+  THIEF: 'เลือกคนที่ต้องการปี้',
 };
 
 export function NightPanel({
@@ -39,66 +22,71 @@ export function NightPanel({
   send: (m: ClientMessage) => void;
   secondsLeft: number | null;
 }) {
-  const step = view.nightStep;
-  if (!step || step === 'RESOLVE') return null;
-  const script = NIGHT_SCRIPT[step];
-  const myTurn = view.actingPlayerIds.includes(view.youId);
-  const actors = view.players.filter((p) => view.actingPlayerIds.includes(p.id));
+  const nameOf = (id: string | null) => (id ? view.players.find((p) => p.id === id)?.name ?? '—' : null);
+  const actors = view.players.filter(
+    (p) => p.alive && p.role && p.role !== 'VILLAGER' && !p.isModerator,
+  );
+  const pickName = nameOf(view.yourNightTarget);
 
   return (
     <div className="card-panel stack">
       <div className="row">
         <span className="badge solid">🌙 คืนที่ {view.round}</span>
-        <span className="badge">{STEP_LABEL[step]}</span>
+        <span className="badge">เลือกพร้อมกัน</span>
         <div className="spacer" />
-        {secondsLeft !== null && <span className="mono">{secondsLeft}s</span>}
+        {secondsLeft !== null && (
+          <span className="mono" style={{ fontSize: '1.3rem' }}>
+            {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
+          </span>
+        )}
       </div>
 
       {view.isModerator ? (
         <>
-          <h3 style={{ margin: 0 }}>{script.call}</h3>
+          <h3 style={{ margin: 0 }}>{NIGHT_CALL}</h3>
           <p className="muted small" style={{ margin: 0 }}>
-            {script.hint}
+            ไม่ต้องเรียกทีละบทบาท ทุกคนกดของตัวเองได้พร้อมกันภายในเวลาเดียว
           </p>
           <div className="note-card">
             <h4>สถานะ (เห็นเฉพาะพิธีกร)</h4>
             <ul>
               {actors.length === 0 ? (
-                <li>ไม่มีผู้เล่นที่ยังมีชีวิตในบทบาทนี้ — รอเวลาแล้วไปขั้นถัดไปตามปกติ</li>
+                <li>ไม่มีผู้เล่นที่ยังมีชีวิตในบทบาทพิเศษ</li>
               ) : (
                 actors.map((a) => (
                   <li key={a.id}>
-                    {a.name}: {view.submittedPlayerIds.includes(a.id) ? '✅ เลือกแล้ว' : '⏳ ยังไม่เลือก'}
+                    {a.name} ({a.role ? ROLES[a.role].name : '—'}):{' '}
+                    {view.submittedPlayerIds.includes(a.id) ? '✅ เลือกแล้ว' : '⏳ ยังไม่เลือก'}
                   </li>
                 ))
               )}
             </ul>
           </div>
-          <button className="primary block" onClick={() => send({ t: 'NEXT_STEP' })}>
-            {step === 'THIEF' ? 'จบกลางคืน → ประกาศผล' : 'ไปขั้นถัดไป'}
+          <button className="primary block" onClick={() => send({ t: 'END_NIGHT' })}>
+            จบกลางคืน → ประกาศผล
           </button>
         </>
-      ) : myTurn ? (
+      ) : view.youHaveNightAction ? (
         <>
-          <h3 style={{ margin: 0 }}>ถึงตาคุณแล้ว — แตะที่ตัวผู้เล่นบนโต๊ะ</h3>
+          <h3 style={{ margin: 0 }}>
+            {view.yourActionLocked ? 'คุณเลือกไปแล้วในรอบนี้' : 'เลือกได้เลย — แตะที่ตัวผู้เล่นบนโต๊ะ'}
+          </h3>
           <p className="muted small" style={{ margin: 0 }}>
-            {view.yourRole ? ROLES[view.yourRole].nightAction : ''}
+            {view.yourRole ? ROLE_CALL[view.yourRole] : ''}
           </p>
-          {view.yourRole === 'KILLER' && view.fellowKillerIds.length > 0 && (
-            <div className="note-card">
-              <h4>เพื่อน Killer ของคุณ</h4>
-              <ul>
-                {view.players
-                  .filter((p) => view.fellowKillerIds.includes(p.id))
-                  .map((p) => (
-                    <li key={p.id}>
-                      {p.name} — {view.killVotes[p.id] ? `เลือก ${view.players.find((x) => x.id === view.killVotes[p.id])?.name ?? '—'}` : 'ยังไม่เลือก'}
-                    </li>
-                  ))}
-              </ul>
-              <p className="small" style={{ margin: '0.4rem 0 0' }}>ต้องเลือกตรงกัน ไม่งั้นคืนนี้ไม่มีใครตาย</p>
-            </div>
-          )}
+          <div className="note-card">
+            <h4>ตัวเลือกของคุณ</h4>
+            <p style={{ margin: 0 }}>
+              {pickName ? (
+                <>
+                  <b>{pickName}</b>
+                  {view.yourActionLocked ? ' (ล็อกแล้ว แก้ไม่ได้)' : ' — แตะคนอื่นเพื่อเปลี่ยนใจได้จนหมดเวลา'}
+                </>
+              ) : (
+                'ยังไม่ได้เลือก'
+              )}
+            </p>
+          </div>
           {view.policeResult && (
             <div className="note-card">
               <h4>ผลการสืบคืนนี้</h4>
@@ -108,12 +96,27 @@ export function NightPanel({
               </p>
             </div>
           )}
+          {view.yourRole === 'KILLER' && view.fellowKillerIds.length > 0 && (
+            <div className="note-card">
+              <h4>เพื่อน Killer ของคุณ</h4>
+              <ul>
+                {view.players
+                  .filter((p) => view.fellowKillerIds.includes(p.id))
+                  .map((p) => (
+                    <li key={p.id}>
+                      {p.name} — {view.killVotes[p.id] ? `เลือก ${nameOf(view.killVotes[p.id])}` : 'ยังไม่เลือก'}
+                    </li>
+                  ))}
+              </ul>
+              <p className="small" style={{ margin: '0.4rem 0 0' }}>ต้องเลือกตรงกัน ไม่งั้นคืนนี้ไม่มีใครตาย</p>
+            </div>
+          )}
         </>
       ) : (
         <>
           <h3 style={{ margin: 0 }}>😴 หลับตา…</h3>
           <p className="muted small" style={{ margin: 0 }}>
-            รอจนกว่าจะถึงตาของคุณ ระหว่างนี้ห้ามพูดในห้องหลัก
+            บทบาทของคุณไม่มีอะไรต้องทำตอนกลางคืน รอจนถึงเช้า และห้ามพูดในห้องหลัก
           </p>
         </>
       )}

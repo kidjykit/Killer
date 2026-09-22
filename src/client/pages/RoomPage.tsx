@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getSavedName, saveName, useCountdown, useRoom } from '../hooks/useRoom';
 import { CardTable, type SeatDecor } from '../components/CardTable';
@@ -136,14 +136,6 @@ export function RoomPage() {
   const [myVote, setMyVote] = useState<string | null>(null);
   useEffect(() => setMyVote(null), [view?.phase, view?.round]);
 
-  const myNightPick = useMemo(() => {
-    if (!view) return null;
-    if (view.yourRole === 'KILLER') return view.killVotes[view.youId] ?? null;
-    return null;
-  }, [view]);
-  const [localPick, setLocalPick] = useState<string | null>(null);
-  useEffect(() => setLocalPick(null), [view?.nightStep, view?.round]);
-
   if (!name) return <NameGate onSubmit={setName} />;
 
   if (!view) {
@@ -165,22 +157,18 @@ export function RoomPage() {
     const modTag =
       view.isModerator && p.role ? `${ROLES[p.role].rank} · ${ROLES[p.role].name}` : undefined;
 
-    // กลางคืน: ถึงตาเราแล้วให้เลือกเป้าหมายได้
-    if (view.phase === 'NIGHT' && view.actingPlayerIds.includes(view.youId) && !view.isModerator) {
+    // กลางคืน: ทุกบทบาทที่มี action เลือกได้พร้อมกันตลอดช่วง ไม่ต้องรอเรียกทีละคน
+    if (view.phase === 'NIGHT' && view.youHaveNightAction && !view.isModerator) {
       const selectable =
+        !view.yourActionLocked &&
         p.alive &&
         !p.isModerator &&
         !(view.yourRole === 'KILLER' && view.fellowKillerIds.concat(view.youId).includes(p.id)) &&
         !(view.yourRole === 'POLICE' && p.id === view.youId);
       return {
         tag: modTag,
-        selected: (localPick ?? myNightPick) === p.id,
-        onSelect: selectable
-          ? () => {
-              setLocalPick(p.id);
-              send({ t: 'NIGHT_ACTION', targetId: p.id });
-            }
-          : undefined,
+        selected: view.yourNightTarget === p.id,
+        onSelect: selectable ? () => send({ t: 'NIGHT_ACTION', targetId: p.id }) : undefined,
       };
     }
 
