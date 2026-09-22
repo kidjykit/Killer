@@ -10,7 +10,7 @@
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false || tsc -b",
     "test": "vitest run",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "npm run build && wrangler deploy"
+    "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
     "react": "^18.3.1",

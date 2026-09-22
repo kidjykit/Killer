@@ -77,13 +77,43 @@ npm run build    # build UI ลง dist/
 
 ## Deploy ขึ้น Cloudflare
 
+โปรเจกต์นี้ deploy เป็น **Cloudflare Worker** (ไม่ใช่ Cloudflare Pages) โดย Worker ตัวเดียว
+เสิร์ฟทั้งหน้าเว็บและ API/WebSocket
+
 ```bash
 npx wrangler login
-npm run cf:deploy       # = npm run build && wrangler deploy
+npm run cf:deploy       # = wrangler deploy (build ตัว UI ให้เองผ่าน [build] ใน wrangler.toml)
 ```
 
-`wrangler.toml` ตั้งค่าไว้ครบแล้ว — Durable Object binding, migration และ SPA fallback
+`wrangler.toml` ตั้งค่าไว้ครบแล้ว — build hook, Durable Object binding, migration และ SPA fallback
 ครั้งแรกที่ deploy Cloudflare จะสร้าง Durable Object namespace ให้เอง
+
+### Deploy อัตโนมัติจาก GitHub
+
+ถ้าอยากให้ push แล้ว deploy เอง ให้ใช้ **Workers Builds** (Cloudflare dashboard → Compute (Workers)
+→ เลือก Worker → Settings → Builds → Connect a repository) ตั้งค่าเป็น
+
+| ช่อง | ค่า |
+| --- | --- |
+| Build command | `npm run build` (หรือเว้นว่างก็ได้ เพราะ `[build]` ใน `wrangler.toml` รันให้อยู่แล้ว) |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | `/` |
+
+> ⚠️ **อย่าต่อ repo นี้เข้ากับ Cloudflare Pages** — Pages ไม่รองรับ Durable Objects และไม่อ่าน
+> `[durable_objects]` / `[assets]` ใน `wrangler.toml` แบบนี้ ถ้าเผลอสร้างเป็น Pages project ไว้
+> ให้ลบทิ้งแล้วสร้างใหม่เป็น Worker
+
+### แก้ปัญหา deploy ไม่ผ่าน
+
+| ข้อความ error | สาเหตุและวิธีแก้ |
+| --- | --- |
+| `The directory specified by the "assets.directory" field ... does not exist` | ยังไม่ได้ build ตัว UI — ปกติ `[build]` ใน `wrangler.toml` จัดการให้แล้ว ถ้ายังเจอให้รัน `npm run build` ก่อนแล้วค่อย `npx wrangler deploy` |
+| `Authentication error` / `code: 10000` | ยังไม่ได้ล็อกอิน รัน `npx wrangler login` หรือถ้า deploy จาก CI ให้ตั้ง `CLOUDFLARE_API_TOKEN` และ `CLOUDFLARE_ACCOUNT_ID` โดย token ต้องมีสิทธิ์ **Workers Scripts: Edit** |
+| `More than one account available` | ตั้ง `CLOUDFLARE_ACCOUNT_ID` หรือเพิ่ม `account_id = "..."` ใน `wrangler.toml` |
+| `Durable Objects` ... `not enabled` / `code: 10084` | บัญชียังไม่ได้เปิดใช้ Workers เข้า dashboard → Compute (Workers) แล้วกดเริ่มใช้งานสักครั้งก่อน (Durable Object แบบ SQLite ที่โปรเจกต์นี้ใช้ อยู่ในแผนฟรี) |
+| `Cannot apply new-sqlite-class migration to class ... that is already depended on` | เคย deploy ด้วย migration แบบ `new_classes` มาก่อน ให้ลบ Worker เดิมทิ้งแล้ว deploy ใหม่ |
+| `workers.dev subdomain` ... `not found` | ยังไม่เคยตั้ง subdomain เข้า dashboard → Workers & Pages → ตั้ง workers.dev subdomain ก่อน |
+| build ล้มที่ `tsc` หรือ `vite` | รัน `npm ci && npm run build` ในเครื่องเพื่อดู error เต็ม ๆ (ตรวจแล้วว่า clean checkout build ผ่าน ทั้ง wrangler 3 และ 4) |
 
 ## วิธีเล่นออนไลน์
 
