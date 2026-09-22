@@ -1,0 +1,19 @@
+name = "killer-game"
+main = "src/worker/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# SPA: ทุกเส้นทางที่ไม่ใช่ไฟล์จริงให้คืน index.html (ไม่งั้น /offline จะถูก redirect กลับ /)
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDurableObject"
+
+# SQLite-backed Durable Objects — ใช้ได้ทั้งแผนฟรีและแผนเสียเงิน
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDurableObject"]

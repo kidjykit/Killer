@@ -1,0 +1,310 @@
+/* ============================================================
+   ธีมขาว–ดำ: กลางวัน = พื้นขาวตัวอักษรดำ, กลางคืน = พื้นดำตัวอักษรขาว
+   สลับด้วย data-mood ที่ <html>
+   ============================================================ */
+
+:root {
+  --ink: #0b0b0c;
+  --paper: #f7f7f5;
+  --bg: var(--paper);
+  --fg: var(--ink);
+  --muted: #6b6b70;
+  --line: rgba(11, 11, 12, 0.16);
+  --line-strong: rgba(11, 11, 12, 0.5);
+  --surface: #ffffff;
+  --surface-2: #ececea;
+  --shadow: 0 2px 0 rgba(11, 11, 12, 0.14), 0 12px 32px rgba(11, 11, 12, 0.1);
+  --felt: #e6e6e2;
+  --accent: #0b0b0c;
+  --accent-fg: #ffffff;
+  --danger: #b3261e;
+  --radius: 14px;
+  --font: 'Noto Sans Thai', 'IBM Plex Sans Thai', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --display: 'Bebas Neue', 'Noto Sans Thai', sans-serif;
+  color-scheme: light;
+}
+
+html[data-mood='night'] {
+  --bg: #0b0b0c;
+  --fg: #f4f4f2;
+  --muted: #9a9aa0;
+  --line: rgba(244, 244, 242, 0.18);
+  --line-strong: rgba(244, 244, 242, 0.55);
+  --surface: #141416;
+  --surface-2: #1d1d20;
+  --shadow: 0 2px 0 rgba(0, 0, 0, 0.6), 0 16px 40px rgba(0, 0, 0, 0.6);
+  --felt: #111113;
+  --accent: #f4f4f2;
+  --accent-fg: #0b0b0c;
+  --danger: #ff6b60;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.6s ease, color 0.6s ease;
+}
+
+h1, h2, h3, h4 { line-height: 1.25; margin: 0 0 0.5em; font-weight: 700; }
+
+a { color: inherit; }
+
+button {
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 0.55rem 1.15rem;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease, border-color 0.15s ease;
+}
+button:hover:not(:disabled) { border-color: var(--fg); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* ปุ่มในแถวเดียวกับ input ต้องไม่ถูกบีบจนข้อความตกบรรทัด */
+.row > button:not(.block) { white-space: nowrap; flex: 0 0 auto; }
+
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button.ghost { background: transparent; }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button.block { width: 100%; border-radius: var(--radius); }
+
+input, select, textarea {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--fg); outline-offset: 1px; }
+
+label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; }
+
+/* ---------- layout ---------- */
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 1rem; }
+.wrap.narrow { max-width: 620px; }
+.stack { display: flex; flex-direction: column; gap: 1rem; }
+.row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+.spacer { flex: 1; }
+
+.card-panel {
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+.mono { font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  border: 1.5px solid var(--line-strong); border-radius: 999px;
+  padding: 0.1rem 0.6rem; font-size: 0.78rem; font-weight: 700;
+}
+.badge.solid { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+.display {
+  font-family: var(--display);
+  letter-spacing: 0.08em;
+  font-size: clamp(2.6rem, 9vw, 5rem);
+  line-height: 0.95;
+  margin: 0;
+}
+
+/* ---------- โต๊ะไพ่ ---------- */
+
+.table-felt {
+  position: relative;
+  border-radius: 999px / 46%;
+  background:
+    radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--felt) 88%, var(--fg) 6%), var(--felt));
+  border: 3px solid var(--line-strong);
+  box-shadow: inset 0 0 0 10px var(--bg), var(--shadow);
+  padding: clamp(1.5rem, 5vw, 3rem);
+  min-height: 340px;
+  display: grid;
+  place-items: center;
+}
+.table-center { text-align: center; max-width: 320px; }
+
+.seat-ring { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: center; }
+
+.seat {
+  width: 108px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 0.5rem;
+  text-align: center;
+  position: relative;
+  transition: border-color 0.2s ease, opacity 0.2s ease, transform 0.15s ease;
+}
+.seat button.seat-hit { all: unset; display: block; width: 100%; cursor: pointer; }
+.seat.selectable { border-color: var(--line-strong); }
+.seat.selectable:hover { transform: translateY(-3px); border-color: var(--fg); }
+.seat.selected { border-color: var(--fg); border-width: 3px; }
+.seat.dead { opacity: 0.4; }
+.seat.dead .seat-name { text-decoration: line-through; }
+.seat-avatar {
+  width: 44px; height: 44px; margin: 0 auto 0.3rem;
+  border-radius: 50%; display: grid; place-items: center;
+  border: 1.5px solid var(--line-strong); font-weight: 900; font-size: 1.1rem;
+}
+.seat-name { font-weight: 700; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat-tag { font-size: 0.7rem; color: var(--muted); }
+.seat-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.seat-dot.on { background: var(--fg); }
+
+/* ---------- การ์ด ---------- */
+
+.deck-stack { position: relative; width: 150px; height: 216px; margin: 0 auto; }
+.deck-stack .deck-card {
+  position: absolute; inset: 0;
+  border-radius: 12px; border: 2px solid var(--line-strong);
+  background:
+    repeating-linear-gradient(45deg, transparent 0 6px, color-mix(in srgb, var(--fg) 8%, transparent) 6px 12px),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+.deck-stack .deck-card:nth-child(1) { transform: rotate(-6deg) translate(-6px, 4px); }
+.deck-stack .deck-card:nth-child(2) { transform: rotate(3deg) translate(4px, 2px); }
+.deck-stack .deck-card:nth-child(3) { transform: none; }
+.deck-stack.drawable:hover .deck-card:nth-child(3) { transform: translateY(-10px); }
+
+.playing-card {
+  width: 190px; height: 274px;
+  border-radius: 14px; border: 2px solid var(--fg);
+  background: var(--surface); color: var(--fg);
+  padding: 0.85rem; margin: 0 auto;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow);
+  position: relative;
+}
+.playing-card .corner { font-family: var(--display); font-size: 1.9rem; line-height: 1; }
+.playing-card .corner.br { position: absolute; right: 0.85rem; bottom: 0.85rem; transform: rotate(180deg); }
+.playing-card .pip { font-size: 3.2rem; text-align: center; margin: 0.2rem 0; }
+.playing-card .role-name { font-weight: 900; text-align: center; font-size: 1.05rem; }
+.playing-card .role-short { text-align: center; font-size: 0.8rem; color: var(--muted); }
+
+.flip { perspective: 1200px; }
+.flip-inner {
+  position: relative; width: 190px; height: 274px; margin: 0 auto;
+  transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); transform-style: preserve-3d;
+}
+.flip.revealed .flip-inner { transform: rotateY(180deg); }
+.flip-face { position: absolute; inset: 0; backface-visibility: hidden; }
+.flip-face.back { transform: rotateY(180deg); }
+
+/* ---------- ช่วงกลางคืน ---------- */
+
+.night-veil {
+  position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  box-shadow: inset 0 0 140px 30px rgba(0, 0, 0, 0.65);
+}
+
+.privacy-note {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+/* ---------- log / note ---------- */
+
+.log { max-height: 260px; overflow-y: auto; font-size: 0.86rem; }
+.log p { margin: 0 0 0.25rem; }
+
+.note-card { border-left: 4px solid var(--fg); background: var(--surface-2); border-radius: 8px; padding: 0.7rem 0.9rem; }
+.note-card h4 { margin: 0 0 0.4rem; font-size: 0.9rem; }
+.note-card ul { margin: 0; padding-left: 1.1rem; font-size: 0.87rem; }
+
+/* ---------- chat ---------- */
+
+.chat-log { height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.87rem; }
+.chat-msg b { font-weight: 700; }
+.chat-tabs { display: flex; gap: 0.35rem; }
+.chat-tabs button { padding: 0.25rem 0.75rem; font-size: 0.8rem; }
+.chat-tabs button[aria-selected='true'] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+/* ---------- ตาราง ---------- */
+
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+
+/* ---------- grid ---------- */
+
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* ห้องเล่น: โต๊ะซ้าย, แผงสั่งงาน + ข้อมูลข้างขวา
+   บนมือถือ ดันแผงสั่งงานขึ้นบนสุด เพราะเป็นสิ่งที่ต้องอ่านก่อนเสมอ */
+.room-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-areas: 'table action' 'table side';
+  grid-template-rows: auto 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.room-grid > .area-table { grid-area: table; }
+.room-grid > .area-action { grid-area: action; }
+.room-grid > .area-side { grid-area: side; }
+@media (max-width: 900px) {
+  .room-grid { grid-template-columns: 1fr; grid-template-areas: 'action' 'table' 'side'; grid-template-rows: auto; }
+}
+
+.tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.tabs button[aria-selected='true'] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+/* ---------- หน้าพิมพ์ ---------- */
+
+.sheet {
+  background: #fff; color: #000;
+  width: 210mm; max-width: 100%; min-height: 297mm;
+  margin: 0 auto; padding: 10mm 11mm 8mm;
+  line-height: 1.38;
+  border: 1px solid #ccc;
+}
+.sheet h1 { font-size: 20pt; margin: 0 0 1.5mm; }
+.sheet h2 { font-size: 10pt; margin: 3.5mm 0 1.5mm; text-transform: uppercase; letter-spacing: 0.08em; }
+.sheet table { font-size: 8pt; }
+.sheet th, .sheet td { border-bottom: 0.5pt solid #999; padding: 1mm 1.6mm; }
+.sheet .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+.sheet .box { border: 0.8pt solid #000; border-radius: 2mm; padding: 2mm 2.6mm; font-size: 8pt; }
+.sheet .box h3 { font-size: 9pt; margin: 0 0 1.2mm; }
+.sheet ol, .sheet ul { margin: 0; padding-left: 4.5mm; }
+
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  .sheet { border: 0; width: auto; min-height: auto; padding: 9mm 10mm; }
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

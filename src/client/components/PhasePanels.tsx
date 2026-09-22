@@ -1,0 +1,292 @@
+import { ROLES } from '../../shared/roles';
+import type { ClientMessage, NightStep, RoomView } from '../../shared/types';
+import { RoleCard } from './PlayingCard';
+
+/** บทพูดของพิธีกรในแต่ละขั้นของกลางคืน ตาม rule.md §3 */
+export const NIGHT_SCRIPT: Record<Exclude<NightStep, 'RESOLVE'>, { call: string; hint: string }> = {
+  KILLER: {
+    call: '“Killer ลืมตา… เลือกเหยื่อของคุณ”',
+    hint: 'ถ้ามี Killer 2 คน ต้องเลือกตรงกัน ไม่งั้นคืนนี้ไม่มีใครตาย',
+  },
+  POLICE: {
+    call: '“Killer หลับตา… ตำรวจลืมตา ชี้คนที่สงสัย”',
+    hint: 'ระบบจะตอบตำรวจเองว่า “ใช่ / ไม่ใช่” — พิธีกรไม่ต้องพยักหน้า',
+  },
+  NUN: {
+    call: '“ตำรวจหลับตา… แม่ชีลืมตา เลือกคนที่จะรักษา”',
+    hint: 'แม่ชีเลือกตัวเองได้ตามกติกาที่ตั้งไว้ในห้อง',
+  },
+  THIEF: {
+    call: '“แม่ชีหลับตา… โจรลืมตา เลือกคนที่จะปี้”',
+    hint: 'ถ้าโดนตัวแม่ชี แม่ชีจะศีลขาด รักษาไม่ขึ้นทั้งคืน',
+  },
+};
+
+const STEP_LABEL: Record<NightStep, string> = {
+  KILLER: 'ตาของ Killer',
+  POLICE: 'ตาของตำรวจ',
+  NUN: 'ตาของแม่ชี',
+  THIEF: 'ตาของโจร',
+  RESOLVE: 'สรุปผล',
+};
+
+export function NightPanel({
+  view,
+  send,
+  secondsLeft,
+}: {
+  view: RoomView;
+  send: (m: ClientMessage) => void;
+  secondsLeft: number | null;
+}) {
+  const step = view.nightStep;
+  if (!step || step === 'RESOLVE') return null;
+  const script = NIGHT_SCRIPT[step];
+  const myTurn = view.actingPlayerIds.includes(view.youId);
+  const actors = view.players.filter((p) => view.actingPlayerIds.includes(p.id));
+
+  return (
+    <div className="card-panel stack">
+      <div className="row">
+        <span className="badge solid">🌙 คืนที่ {view.round}</span>
+        <span className="badge">{STEP_LABEL[step]}</span>
+        <div className="spacer" />
+        {secondsLeft !== null && <span className="mono">{secondsLeft}s</span>}
+      </div>
+
+      {view.isModerator ? (
+        <>
+          <h3 style={{ margin: 0 }}>{script.call}</h3>
+          <p className="muted small" style={{ margin: 0 }}>
+            {script.hint}
+          </p>
+          <div className="note-card">
+            <h4>สถานะ (เห็นเฉพาะพิธีกร)</h4>
+            <ul>
+              {actors.length === 0 ? (
+                <li>ไม่มีผู้เล่นที่ยังมีชีวิตในบทบาทนี้ — รอเวลาแล้วไปขั้นถัดไปตามปกติ</li>
+              ) : (
+                actors.map((a) => (
+                  <li key={a.id}>
+                    {a.name}: {view.submittedPlayerIds.includes(a.id) ? '✅ เลือกแล้ว' : '⏳ ยังไม่เลือก'}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+          <button className="primary block" onClick={() => send({ t: 'NEXT_STEP' })}>
+            {step === 'THIEF' ? 'จบกลางคืน → ประกาศผล' : 'ไปขั้นถัดไป'}
+          </button>
+        </>
+      ) : myTurn ? (
+        <>
+          <h3 style={{ margin: 0 }}>ถึงตาคุณแล้ว — แตะที่ตัวผู้เล่นบนโต๊ะ</h3>
+          <p className="muted small" style={{ margin: 0 }}>
+            {view.yourRole ? ROLES[view.yourRole].nightAction : ''}
+          </p>
+          {view.yourRole === 'KILLER' && view.fellowKillerIds.length > 0 && (
+            <div className="note-card">
+              <h4>เพื่อน Killer ของคุณ</h4>
+              <ul>
+                {view.players
+                  .filter((p) => view.fellowKillerIds.includes(p.id))
+                  .map((p) => (
+                    <li key={p.id}>
+                      {p.name} — {view.killVotes[p.id] ? `เลือก ${view.players.find((x) => x.id === view.killVotes[p.id])?.name ?? '—'}` : 'ยังไม่เลือก'}
+                    </li>
+                  ))}
+              </ul>
+              <p className="small" style={{ margin: '0.4rem 0 0' }}>ต้องเลือกตรงกัน ไม่งั้นคืนนี้ไม่มีใครตาย</p>
+            </div>
+          )}
+          {view.policeResult && (
+            <div className="note-card">
+              <h4>ผลการสืบคืนนี้</h4>
+              <p style={{ margin: 0 }}>
+                {view.policeResult.targetName} —{' '}
+                <b>{view.policeResult.isKiller ? '✅ คือ Killer!' : '❌ ไม่ใช่ Killer'}</b>
+              </p>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <h3 style={{ margin: 0 }}>😴 หลับตา…</h3>
+          <p className="muted small" style={{ margin: 0 }}>
+            รอจนกว่าจะถึงตาของคุณ ระหว่างนี้ห้ามพูดในห้องหลัก
+          </p>
+        </>
+      )}
+
+      <div className="privacy-note">
+        🔒 ช่วงกลางคืน ไมค์และกล้องของทุกคนถูกปิด และซ่อนสถานะทั้งหมดจากผู้เล่นคนอื่น
+        มีเพียงพิธีกรที่เห็นว่าใครกำลังทำอะไร
+      </div>
+    </div>
+  );
+}
+
+export function DayPanel({ view, send }: { view: RoomView; send: (m: ClientMessage) => void }) {
+  const last = view.publicLog.slice(-4);
+  const canControl = view.isModerator || (view.settings.moderatorMode === 'AUTO' && !!view.players.find((p) => p.id === view.youId)?.isHost);
+  return (
+    <div className="card-panel stack">
+      <div className="row">
+        <span className="badge solid">☀️ กลางวัน รอบที่ {view.round}</span>
+      </div>
+      <h3 style={{ margin: 0 }}>ประกาศผลของคืนที่ผ่านมา</h3>
+      <div className="log">
+        {last.map((line, i) => (
+          <p key={i}>{line}</p>
+        ))}
+      </div>
+      {canControl && (
+        <div className="row">
+          <button className="primary" onClick={() => send({ t: 'OPEN_DISCUSSION' })}>
+            เปิดช่วงอภิปราย
+          </button>
+          <button onClick={() => send({ t: 'OPEN_VOTE' })}>ข้ามไปโหวตเลย</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DiscussionPanel({
+  view,
+  send,
+  secondsLeft,
+}: {
+  view: RoomView;
+  send: (m: ClientMessage) => void;
+  secondsLeft: number | null;
+}) {
+  const canControl = view.isModerator || (view.settings.moderatorMode === 'AUTO' && !!view.players.find((p) => p.id === view.youId)?.isHost);
+  return (
+    <div className="card-panel stack">
+      <div className="row">
+        <span className="badge solid">💬 อภิปราย</span>
+        <div className="spacer" />
+        {secondsLeft !== null && (
+          <span className="mono" style={{ fontSize: '1.3rem' }}>
+            {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
+          </span>
+        )}
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        พูดคุย จับผิด และกล่าวหากันได้เต็มที่ — ทุกคนโกหกได้ ไม่ถือว่าโกง
+      </p>
+      {canControl && (
+        <button className="primary block" onClick={() => send({ t: 'OPEN_VOTE' })}>
+          ปิดการอภิปราย → เปิดโหวต
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function VotePanel({ view, send }: { view: RoomView; send: (m: ClientMessage) => void }) {
+  const me = view.players.find((p) => p.id === view.youId);
+  const canVote = !!me?.alive && !me.isModerator;
+  const canControl = view.isModerator || (view.settings.moderatorMode === 'AUTO' && !!me?.isHost);
+  return (
+    <div className="card-panel stack">
+      <span className="badge solid">🗳️ โหวต รอบที่ {view.round}</span>
+      {canVote ? (
+        <>
+          <h3 style={{ margin: 0 }}>แตะที่ตัวผู้เล่นบนโต๊ะเพื่อโหวต</h3>
+          <button className="block" onClick={() => send({ t: 'CAST_VOTE', targetId: 'SKIP' })}>
+            งดออกเสียง
+          </button>
+        </>
+      ) : (
+        <p className="muted small" style={{ margin: 0 }}>คุณไม่มีสิทธิ์โหวตในรอบนี้</p>
+      )}
+      {canControl && (
+        <button className="primary block" onClick={() => send({ t: 'CLOSE_VOTE' })}>
+          ปิดโหวต → ประกาศผล
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function VoteResultPanel({ view, send }: { view: RoomView; send: (m: ClientMessage) => void }) {
+  const report = view.voteReports[view.voteReports.length - 1];
+  const canControl = view.isModerator || (view.settings.moderatorMode === 'AUTO' && !!view.players.find((p) => p.id === view.youId)?.isHost);
+  return (
+    <div className="card-panel stack">
+      <span className="badge solid">⚖️ ผลโหวต</span>
+      {report && (
+        <div className="log">
+          {report.lines.map((l, i) => (
+            <p key={i}>{l}</p>
+          ))}
+        </div>
+      )}
+      {canControl && (
+        <button className="primary block" onClick={() => send({ t: 'NEXT_ROUND' })}>
+          {report?.tied && !report.noElimination ? 'เปิดโหวตแก้ตัวรอบสอง' : `เข้าสู่คืนที่ ${view.round + 1}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function EndPanel({ view, send }: { view: RoomView; send: (m: ClientMessage) => void }) {
+  const me = view.players.find((p) => p.id === view.youId);
+  return (
+    <div className="card-panel stack">
+      <span className="badge solid">🏁 จบเกม</span>
+      <h2 style={{ margin: 0 }}>{view.winner?.faction === 'GOOD' ? 'ฝ่ายประชาชนชนะ!' : 'ฝ่าย Killer ชนะ!'}</h2>
+      <p style={{ margin: 0 }}>{view.winner?.reason}</p>
+      <table>
+        <thead>
+          <tr>
+            <th>ผู้เล่น</th>
+            <th>ไพ่</th>
+            <th>บทบาท</th>
+          </tr>
+        </thead>
+        <tbody>
+          {view.finalReveal?.map((r) => (
+            <tr key={r.playerId}>
+              <td>{r.name}</td>
+              <td className="mono">{r.card}</td>
+              <td>{ROLES[r.role].name}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {me?.isHost && (
+        <button className="primary block" onClick={() => send({ t: 'RESTART' })}>
+          เล่นอีกรอบ (กลับไปล็อบบี้)
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function YourCardPanel({ view }: { view: RoomView }) {
+  if (view.isModerator) {
+    return (
+      <div className="card-panel stack">
+        <h3 style={{ margin: 0 }}>🎙️ คุณคือพิธีกร</h3>
+        <p className="muted small" style={{ margin: 0 }}>คุณไม่ได้รับไพ่ และเห็นบทบาทของทุกคนบนโต๊ะ</p>
+      </div>
+    );
+  }
+  if (!view.yourRole) return null;
+  const info = ROLES[view.yourRole];
+  return (
+    <div className="card-panel stack" style={{ alignItems: 'center' }}>
+      <RoleCard role={view.yourRole} card={view.yourCard} />
+      <p className="small" style={{ margin: 0, textAlign: 'center' }}>
+        <b>หน้าที่:</b> {info.duty}
+      </p>
+      <p className="small muted" style={{ margin: 0, textAlign: 'center' }}>
+        💡 {info.tip}
+      </p>
+    </div>
+  );
+}
