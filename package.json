@@ -10,7 +10,8 @@
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false || tsc -b",
     "test": "vitest run",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy"
+    "cf:deploy": "wrangler deploy",
+    "music": "node tools/compose-music.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

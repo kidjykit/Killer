@@ -70,8 +70,11 @@ export function useGameAudio(view: RoomView | null) {
     prevAlive.current = aliveNow;
   }, [view]);
 
-  // ออกจากหน้าห้องแล้วต้องเงียบ
-  useEffect(() => () => gameAudio.stopAll(), []);
+  // ดึงไฟล์เพลงมาเตรียมไว้ตั้งแต่เข้าห้อง จะได้ทันจังหวะเริ่มเกม
+  useEffect(() => {
+    gameAudio.preload();
+    return () => gameAudio.stopAll();
+  }, []);
 }
 
 /** อ่านสถานะเปิด/ปิดเสียงให้ React re-render ตาม */

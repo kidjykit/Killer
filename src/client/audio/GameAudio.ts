@@ -1,8 +1,13 @@
 /**
- * ดนตรีประกอบของเกม — สังเคราะห์สดด้วย Web Audio API ทั้งหมด ไม่มีไฟล์เสียงแนบ
+ * ดนตรีประกอบของเกม — เล่นไฟล์เพลงจริงจาก public/audio/ เป็นหลัก
+ * และมีเสียงสังเคราะห์ด้วย Web Audio API เป็นตัวสำรองเสมอ
  *
- * เหตุผลที่ไม่ใช้ไฟล์ mp3: ไม่ต้องกังวลเรื่องลิขสิทธิ์ ไม่เพิ่มขนาด bundle เลย
- * และเล่นได้ทันทีแม้เน็ตช้า ถ้าอยากเปลี่ยนไปใช้เพลงจริงภายหลัง ดูหมายเหตุท้ายไฟล์
+ * ทำไมต้องมีตัวสำรอง: ไฟล์เพลงอาจยังโหลดไม่เสร็จตอนถึงจังหวะที่ต้องเล่น
+ * หรือโหลดไม่ได้เลย (เน็ตหลุด/ไฟล์หาย) เสียงสังเคราะห์เล่นได้ทันทีโดยไม่ต้องรอ
+ * เกมจึงไม่มีทางเงียบสนิทเพราะเน็ต และเมื่อไฟล์มาถึงจะสลับไปใช้ไฟล์จริงให้เอง
+ *
+ * เพลงทั้งหมดแต่งขึ้นเองด้วย tools/compose-music.mjs (`npm run music`)
+ * จะเปลี่ยนเป็นเพลงของคุณเองก็แค่วางไฟล์ทับใน public/audio/ ชื่อเดิม
  */
 
 export type Ambience = 'none' | 'night' | 'day' | 'vote';
@@ -20,6 +25,28 @@ export type Cue =
   | 'winEvil';
 
 const STORAGE_KEY = 'killer.audio';
+const AUDIO_BASE = '/audio/';
+
+/** เสียงที่มีไฟล์เพลงจริง — ที่เหลือใช้เสียงสังเคราะห์ (เป็นเอฟเฟกต์สั้น ๆ ไม่ใช่ดนตรี) */
+const CUE_FILES: Partial<Record<Cue, string>> = {
+  gameStart: 'start',
+  dayBreak: 'daybreak',
+  death: 'death',
+  eliminate: 'eliminate',
+  winGood: 'win-good',
+  winEvil: 'win-evil',
+};
+
+/** เพลงคลอพื้นหลังของแต่ละช่วง */
+const LOOP_FILES: Partial<Record<Ambience, string>> = {
+  night: 'night',
+  day: 'day',
+  vote: 'vote',
+};
+
+/** ความดังของไฟล์เพลงเทียบกับ master (ไฟล์ normalise มาที่ -1.5 dB จึงต้องหรี่ลง) */
+const LOOP_GAIN = 0.5;
+const CUE_GAIN = 0.75;
 
 /** โน้ตในบันไดเสียง A minor — ใช้ให้เสียงทุกตัวเข้ากันเป็นดนตรีเดียว */
 const A2 = 110, C3 = 130.81, E3 = 164.81, A3 = 220, C4 = 261.63, E4 = 329.63, G4 = 392, A4 = 440, C5 = 523.25, E5 = 659.25;
@@ -44,6 +71,9 @@ export class GameAudio {
   private stopAmbience: (() => void) | null = null;
   private ambience: Ambience = 'none';
   private noiseBuffer: AudioBuffer | null = null;
+  private buffers = new Map<string, AudioBuffer | null>();
+  private loading = new Map<string, Promise<AudioBuffer | null>>();
+  private loopNode: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
   private listeners = new Set<() => void>();
   private muted: boolean;
   private volume: number;
@@ -93,8 +123,14 @@ export class GameAudio {
     this.muted = muted;
     this.applyMasterGain();
     // ปิดเสียงแล้วหยุด ambience ไปเลย จะได้ไม่กิน CPU ทิ้งไว้เฉย ๆ
-    if (muted) this.teardownAmbience();
-    else if (this.ambience !== 'none') this.startAmbience(this.ambience);
+    if (muted) {
+      this.stopLoop(0.3);
+      this.stopSynthAmbience();
+    } else if (this.ambience !== 'none') {
+      const resume = this.ambience;
+      this.ambience = 'none';
+      this.setAmbience(resume);
+    }
     this.emit();
   }
 
@@ -209,11 +245,9 @@ export class GameAudio {
     return buf;
   }
 
-  /* ---------------- เสียงเฉพาะจังหวะของเกม ---------------- */
+  /* ---------------- เสียงสังเคราะห์ (ตัวสำรองของไฟล์เพลง) ---------------- */
 
-  play(cue: Cue) {
-    if (this.muted) return;
-    this.unlock();
+  private synthCue(cue: Cue) {
     switch (cue) {
       // เริ่มเกม — อาร์เพจจิโอไต่ขึ้นแล้วลงคอร์ด A minor
       case 'gameStart':
@@ -285,15 +319,8 @@ export class GameAudio {
 
   /* ---------------- เพลงคลอพื้นหลัง ---------------- */
 
-  /** เปลี่ยนเพลงคลอตามช่วงเวลาในเกม เรียกซ้ำด้วยค่าเดิมได้ ไม่เริ่มใหม่ */
-  setAmbience(next: Ambience) {
-    if (next === this.ambience) return;
-    this.ambience = next;
-    this.startAmbience(next);
-  }
-
-  private startAmbience(mood: Ambience) {
-    this.teardownAmbience();
+  private startSynthAmbience(mood: Ambience) {
+    this.stopSynthAmbience();
     if (mood === 'none' || this.muted) return;
     this.unlock();
     const ready = this.ready();
@@ -400,24 +427,152 @@ export class GameAudio {
     };
   }
 
-  private teardownAmbience() {
+  private stopSynthAmbience() {
     this.stopAmbience?.();
     this.stopAmbience = null;
+  }
+
+  /* ---------------- ชั้นไฟล์เพลงจริง ---------------- */
+
+  /**
+   * โหลดไฟล์เพลงมาเก็บไว้ ถ้าโหลดหรือ decode ไม่ผ่านจะจำว่าไฟล์นี้ใช้ไม่ได้
+   * แล้วไม่ลองซ้ำอีก (ตกไปใช้เสียงสังเคราะห์แทนตลอด)
+   */
+  private loadTrack(name: string): Promise<AudioBuffer | null> {
+    const cached = this.buffers.get(name);
+    if (cached !== undefined) return Promise.resolve(cached);
+    const inflight = this.loading.get(name);
+    if (inflight) return inflight;
+
+    const job = (async () => {
+      try {
+        this.unlock();
+        if (!this.ctx) return null;
+        const res = await fetch(`${AUDIO_BASE}${name}.mp3`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const decoded = await this.ctx.decodeAudioData(await res.arrayBuffer());
+        this.buffers.set(name, decoded);
+        return decoded;
+      } catch {
+        this.buffers.set(name, null);
+        return null;
+      } finally {
+        this.loading.delete(name);
+      }
+    })();
+    this.loading.set(name, job);
+    return job;
+  }
+
+  /** ดึงเพลงที่จะได้ใช้แน่ ๆ มาเตรียมไว้ล่วงหน้า เรียกตอนเข้าห้อง */
+  preload() {
+    this.unlock();
+    for (const name of ['start', 'night', 'day']) void this.loadTrack(name);
+  }
+
+  private playBuffer(buffer: AudioBuffer, gain: number) {
+    const ready = this.ready();
+    if (!ready) return;
+    const { ctx, master } = ready;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, ctx.currentTime);
+    src.connect(g).connect(master);
+    src.start();
+  }
+
+  /** เริ่มเพลงคลอแบบวนลูป พร้อมเฟดเข้า */
+  private startLoop(buffer: AudioBuffer, fade = 1.2) {
+    const ready = this.ready();
+    if (!ready) return;
+    const { ctx, master } = ready;
+    this.stopLoop(fade);
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(LOOP_GAIN, ctx.currentTime + fade);
+    src.connect(g).connect(master);
+    src.start();
+    this.loopNode = { src, gain: g };
+  }
+
+  private stopLoop(fade = 0.9) {
+    const node = this.loopNode;
+    this.loopNode = null;
+    if (!node || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    node.gain.gain.cancelScheduledValues(t);
+    node.gain.gain.setValueAtTime(Math.max(0.0001, node.gain.gain.value), t);
+    node.gain.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+    try {
+      node.src.stop(t + fade + 0.05);
+    } catch {
+      /* หยุดไปแล้ว */
+    }
+  }
+
+  /**
+   * เปลี่ยนเพลงคลอตามช่วงเวลาในเกม เรียกซ้ำด้วยค่าเดิมได้ ไม่เริ่มใหม่
+   * ถ้าไฟล์ยังโหลดไม่เสร็จจะคลอด้วยเสียงสังเคราะห์ไปก่อน แล้วสลับเมื่อไฟล์มาถึง
+   */
+  setAmbience(next: Ambience) {
+    if (next === this.ambience) return;
+    this.ambience = next;
+    this.stopLoop();
+    this.stopSynthAmbience();
+    if (next === 'none' || this.muted) return;
+
+    const name = LOOP_FILES[next];
+    if (!name) return;
+
+    const cached = this.buffers.get(name);
+    if (cached) {
+      this.startLoop(cached);
+      return;
+    }
+    this.startSynthAmbience(next);
+    void this.loadTrack(name).then((buffer) => {
+      // ระหว่างรอโหลด ผู้เล่นอาจเปลี่ยนช่วงหรือปิดเสียงไปแล้ว
+      if (!buffer || this.ambience !== next || this.muted) return;
+      this.stopSynthAmbience();
+      this.startLoop(buffer);
+    });
+  }
+
+  /** เล่นเสียงตามจังหวะเกม — ใช้ไฟล์เพลงถ้าพร้อม ไม่งั้นใช้เสียงสังเคราะห์ทันทีโดยไม่รอโหลด */
+  play(cue: Cue) {
+    if (this.muted) return;
+    this.unlock();
+    const name = CUE_FILES[cue];
+    if (name) {
+      const cached = this.buffers.get(name);
+      if (cached) {
+        this.playBuffer(cached, CUE_GAIN);
+        return;
+      }
+      void this.loadTrack(name);
+    }
+    this.synthCue(cue);
   }
 
   /** หยุดทุกอย่าง ใช้ตอนออกจากห้อง */
   stopAll() {
     this.ambience = 'none';
-    this.teardownAmbience();
+    this.stopLoop(0.4);
+    this.stopSynthAmbience();
   }
 }
 
 export const gameAudio = new GameAudio();
 
 /*
- * อยากเปลี่ยนไปใช้ไฟล์เพลงจริงแทน?
- * วางไฟล์ไว้ใน public/audio/ แล้วแก้แค่ในไฟล์นี้ไฟล์เดียว:
- *   - play(cue)      → new Audio('/audio/<cue>.mp3').play()
- *   - setAmbience()  → <audio loop> ต่อเข้ากับ master gain เดิม
- * ส่วนที่เหลือของแอป (useGameAudio, ปุ่มเปิด/ปิดเสียง) ไม่ต้องแก้เลย
+ * อยากใช้เพลงของตัวเอง?
+ * วางไฟล์ .mp3 ทับใน public/audio/ โดยใช้ชื่อเดิม แล้ว build ใหม่ — ไม่ต้องแก้โค้ดเลย
+ *   start / night / day / vote / daybreak / death / eliminate / win-good / win-evil
+ * night, day, vote เป็นเพลงวนลูป ควรตัดหัวท้ายให้ต่อเนียน
+ * หรือจะแก้เพลงที่มีอยู่ ก็แก้ tools/compose-music.mjs แล้วรัน `npm run music`
  */
