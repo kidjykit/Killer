@@ -15,6 +15,7 @@ import {
 } from '../shared/types';
 import { MAX_PLAYERS, buildDeck, deckFor, shuffle, validateCount } from '../shared/roles';
 import { checkWinner, publicNightAnnouncement, resolveNight, tallyVotes } from '../shared/engine';
+import { type IdlePolicy, maintenanceDue, nextMaintenanceAt, policyFromEnv } from './maintenance';
 
 const CHAT_LIMIT = 200;
 /** บทบาทที่มี action ตอนกลางคืน — ทุกบทบาทนี้ลืมตาพร้อมกัน ไม่ได้เรียกทีละคน */
@@ -25,6 +26,9 @@ const AUTO_NIGHT_FALLBACK = 45;
 /** โหมด AUTO: เวลาให้อ่านผลประกาศก่อนเปิดอภิปราย และเวลาให้อ่านผลโหวตก่อนขึ้นคืนใหม่ (วินาที) */
 const AUTO_READ_REPORT = 12;
 const AUTO_READ_VOTE = 15;
+/** เพดานประวัติที่เก็บไว้ในห้อง กันไม่ให้ข้อมูลโตไม่สิ้นสุดเมื่อเล่นกันยาว ๆ */
+const PUBLIC_LOG_LIMIT = 120;
+const REPORT_LIMIT = 40;
 
 interface RoomState {
   code: string;
@@ -47,6 +51,8 @@ interface RoomState {
   /** กองไพ่ที่เหลือให้จั่ว ตอนเฟส DEALING */
   deck: Array<{ role: RoleId; card: string }>;
   createdAt: number;
+  /** ครั้งล่าสุดที่มีข้อความจากผู้เล่นเข้ามา ใช้วัดว่าห้องถูกทิ้งร้างหรือยัง */
+  lastActivity: number;
 }
 
 const emptyActions = (): NightActions => ({
@@ -61,9 +67,13 @@ export class RoomDurableObject implements DurableObject {
   private room: RoomState | null = null;
   /** ws -> playerId */
   private sockets = new Map<WebSocket, string>();
+  private policy: IdlePolicy;
+  /** กันไม่ให้ PING ที่ส่งมาทุก 25 วินาทีเขียน storage ถี่เกินจำเป็น */
+  private lastHeartbeatSave = 0;
 
-  constructor(state: DurableObjectState) {
+  constructor(state: DurableObjectState, env: Record<string, unknown> = {}) {
     this.state = state;
+    this.policy = policyFromEnv(env);
   }
 
   private async load(code: string): Promise<RoomState> {
@@ -90,12 +100,31 @@ export class RoomDurableObject implements DurableObject {
         policeResults: {},
         deck: [],
         createdAt: Date.now(),
+        lastActivity: Date.now(),
       };
+    // ห้องที่บันทึกไว้ก่อนมีฟีเจอร์นี้จะยังไม่มี lastActivity
+    this.room.lastActivity ??= this.room.createdAt ?? Date.now();
     return this.room;
   }
 
   private async save() {
-    if (this.room) await this.state.storage.put('room', this.room);
+    if (!this.room) return;
+    this.trimHistory(this.room);
+    await this.state.storage.put('room', this.room);
+  }
+
+  /** ตัดประวัติเก่าทิ้งก่อนบันทึกทุกครั้ง เพื่อให้ขนาดห้องมีเพดานเสมอ */
+  private trimHistory(room: RoomState) {
+    if (room.publicLog.length > PUBLIC_LOG_LIMIT) {
+      room.publicLog = room.publicLog.slice(-PUBLIC_LOG_LIMIT);
+    }
+    if (room.nightReports.length > REPORT_LIMIT) {
+      room.nightReports = room.nightReports.slice(-REPORT_LIMIT);
+    }
+    if (room.voteReports.length > REPORT_LIMIT) {
+      room.voteReports = room.voteReports.slice(-REPORT_LIMIT);
+    }
+    if (room.chat.length > CHAT_LIMIT) room.chat = room.chat.slice(-CHAT_LIMIT);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -186,7 +215,17 @@ export class RoomDurableObject implements DurableObject {
       return this.error(ws, 'ข้อความไม่ถูกต้อง');
     }
 
-    if (msg.t === 'PING') return this.send(ws, { t: 'PONG' });
+    room.lastActivity = Date.now();
+    if (msg.t === 'PING') {
+      this.send(ws, { t: 'PONG' });
+      // ต่ออายุห้องไว้ แต่เขียน storage อย่างมากนาทีละครั้ง
+      if (Date.now() - this.lastHeartbeatSave > 60_000) {
+        this.lastHeartbeatSave = Date.now();
+        await this.scheduleAlarm(room);
+        await this.save();
+      }
+      return;
+    }
 
     if (msg.t === 'JOIN') return this.handleJoin(ws, room, msg);
 
@@ -363,7 +402,7 @@ export class RoomDurableObject implements DurableObject {
     }
 
     this.sockets.set(ws, player.id);
-    void this.save();
+    void this.scheduleAlarm(room).then(() => this.save());
     this.broadcast();
   }
 
@@ -607,19 +646,69 @@ export class RoomDurableObject implements DurableObject {
 
   /* ---------------------------- timers ---------------------------- */
 
+  /**
+   * Durable Object ตั้ง alarm ได้ทีละอันเดียว จึงต้องเอาเวลาที่ใกล้ที่สุดระหว่าง
+   * "หมดเวลาเฟส" กับ "ถึงรอบเก็บกวาดห้องร้าง" มาใช้
+   */
   private async scheduleAlarm(room: RoomState) {
+    const maintenance = nextMaintenanceAt(room.phase, room.lastActivity, this.policy);
+    const target = Math.min(room.deadline ?? Number.POSITIVE_INFINITY, maintenance);
     const existing = await this.state.storage.getAlarm();
-    if (room.deadline) {
-      if (existing !== room.deadline) await this.state.storage.setAlarm(room.deadline);
-    } else if (existing) {
-      await this.state.storage.deleteAlarm();
+
+    // ถ้าต้องตื่นเร็วขึ้นกว่าเดิม ต้องตั้งใหม่เสมอ ไม่งั้นจะพลาดรอบ
+    // (เช่น ห้องเปลี่ยนจากล็อบบี้เป็นกำลังเล่น กำหนดตรวจจะขยับเข้ามาใกล้ขึ้น)
+    // ส่วนการเลื่อนออกไปเพราะ ping ยอมให้คลาดได้ จะได้ไม่เขียน storage ถี่เกินจำเป็น
+    const slack = target === room.deadline ? 1_000 : 60_000;
+    if (existing === null || target < existing - 1_000 || target > existing + slack) {
+      await this.state.storage.setAlarm(target);
     }
+  }
+
+  /** ลบห้องทิ้งทั้งห้อง แล้วตัดการเชื่อมต่อที่ยังค้างอยู่ */
+  private async destroyRoom() {
+    for (const ws of this.sockets.keys()) {
+      try {
+        ws.close(1000, 'ห้องถูกลบเพราะไม่มีการใช้งาน');
+      } catch {
+        /* ปิดไปแล้ว */
+      }
+    }
+    this.sockets.clear();
+    this.room = null;
+    await this.state.storage.deleteAll();
+  }
+
+  /**
+   * เกมค้างและไม่มีใครแตะมานาน → เด้งกลับล็อบบี้และเอาคนที่หลุดไปแล้วออก
+   * เพื่อให้เปิดลิงก์เดิมแล้วตั้งวงใหม่ได้ ไม่ติด "เกมเริ่มไปแล้ว เข้าร่วมกลางคันไม่ได้"
+   */
+  private idleResetToLobby(room: RoomState) {
+    this.resetToLobby(room);
+    room.players = room.players.filter((p) => p.connected);
+    this.reseat();
+    if (room.players.length && !room.players.some((p) => p.isHost)) room.players[0].isHost = true;
+    room.publicLog = ['💤 ห้องถูกทิ้งไว้นาน ระบบรีเซ็ตกลับสู่ล็อบบี้ให้แล้ว'];
   }
 
   async alarm() {
     const room = this.room ?? (await this.state.storage.get<RoomState>('room')) ?? null;
     if (!room) return;
     this.room = room;
+    // เก็บกวาดห้องร้างก่อนเสมอ ไม่ว่า alarm นี้จะถูกตั้งไว้เพราะอะไร
+    const due = maintenanceDue(room.phase, Date.now() - room.lastActivity, this.policy);
+    if (due === 'delete') {
+      await this.destroyRoom();
+      return;
+    }
+    if (due === 'reset') {
+      this.idleResetToLobby(room);
+      room.deadline = null;
+      await this.scheduleAlarm(room);
+      await this.save();
+      this.broadcast();
+      return;
+    }
+
     if (!room.deadline || Date.now() < room.deadline - 500) {
       await this.scheduleAlarm(room);
       return;

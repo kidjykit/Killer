@@ -11,7 +11,8 @@
     "test": "vitest run",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy",
-    "music": "node tools/compose-music.mjs"
+    "music": "node tools/compose-music.mjs",
+    "test:expiry": "node tools/test-room-expiry.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

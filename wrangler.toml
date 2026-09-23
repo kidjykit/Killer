@@ -9,6 +9,13 @@ compatibility_flags = ["nodejs_compat"]
 [build]
 command = "npm run build"
 
+# อายุของห้องที่ถูกทิ้งร้าง (ปรับได้โดยไม่ต้องแก้โค้ด)
+#   ROOM_IDLE_RESET_SECONDS  — เกมค้างนานเท่านี้ → เด้งกลับล็อบบี้ ให้ตั้งวงใหม่ได้
+#   ROOM_IDLE_DELETE_SECONDS — ร้างนานเท่านี้ → ลบห้องทิ้งทั้งห้อง
+[vars]
+ROOM_IDLE_RESET_SECONDS = 1800
+ROOM_IDLE_DELETE_SECONDS = 3600
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
