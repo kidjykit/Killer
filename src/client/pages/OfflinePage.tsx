@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MAX_PLAYERS, MIN_PLAYERS, ROLES, buildDeck, deckFor, shuffle, validateCount } from '../../shared/roles';
 import { FlipCard } from '../components/PlayingCard';
+import { gameAudio } from '../audio/GameAudio';
+import { SoundToggle } from '../components/SoundToggle';
 import type { RoleId } from '../../shared/types';
 
 interface Dealt {
@@ -33,6 +35,8 @@ export function OfflinePage() {
   );
 
   const deal = () => {
+    gameAudio.unlock();
+    gameAudio.play('gameStart');
     const deck = shuffle(buildDeck(deckFor(filled.length)));
     setDealt(filled.map((name, i) => ({ name, role: deck[i].role, card: deck[i].card })));
     setIndex(0);
@@ -55,6 +59,7 @@ export function OfflinePage() {
           <div className="row">
             <Link to="/">← หน้าแรก</Link>
             <div className="spacer" />
+            <SoundToggle />
             <Link to="/print" className="small">ตารางสรุปสำหรับพิมพ์ →</Link>
           </div>
 
@@ -192,7 +197,13 @@ export function OfflinePage() {
               ส่งเครื่องให้ <b>{current.name}</b> แล้วกันไม่ให้คนอื่นมองจอ
             </p>
             <FlipCard role={null} revealed={false} />
-            <button className="primary block" onClick={() => setRevealed(true)}>
+            <button
+              className="primary block"
+              onClick={() => {
+                gameAudio.play('dealCard');
+                setRevealed(true);
+              }}
+            >
               ฉันคือ {current.name} — เปิดดูไพ่
             </button>
           </>

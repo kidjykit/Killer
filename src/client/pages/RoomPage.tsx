@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getSavedName, saveName, useCountdown, useRoom } from '../hooks/useRoom';
+import { useGameAudio } from '../hooks/useGameAudio';
+import { gameAudio } from '../audio/GameAudio';
+import { SoundToggle } from '../components/SoundToggle';
 import { CardTable, type SeatDecor } from '../components/CardTable';
 import { Chat } from '../components/Chat';
 import { Lobby } from '../components/Lobby';
@@ -28,6 +31,8 @@ function NameGate({ onSubmit }: { onSubmit: (name: string) => void }) {
           e.preventDefault();
           const n = name.trim();
           if (!n) return;
+          // เบราว์เซอร์อนุญาตให้เริ่มเสียงได้เฉพาะจากการกดของผู้ใช้เท่านั้น
+          gameAudio.unlock();
           saveName(n);
           onSubmit(n);
         }}
@@ -117,6 +122,7 @@ export function RoomPage() {
   const [name, setName] = useState(getSavedName());
   const { view, status, error, send, clearError } = useRoom(name ? code.toUpperCase() : undefined, name);
   const secondsLeft = useCountdown(view?.deadline ?? null);
+  useGameAudio(view);
 
   // ธีมขาว–ดำสลับตามช่วงเวลาในเกม
   useEffect(() => {
@@ -206,6 +212,7 @@ export function RoomPage() {
         <div className="spacer" />
         {status !== 'open' && <span className="badge">⚠️ กำลังต่อใหม่…</span>}
         {view.isModerator && <span className="badge solid">พิธีกร</span>}
+        <SoundToggle />
       </header>
 
       {error && (

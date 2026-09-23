@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../../shared/roles';
+import { gameAudio } from '../audio/GameAudio';
 
 export function HomePage() {
   const nav = useNavigate();
@@ -13,6 +14,7 @@ export function HomePage() {
   }, []);
 
   const createRoom = async () => {
+    gameAudio.unlock();
     setBusy(true);
     setErr(null);
     try {
